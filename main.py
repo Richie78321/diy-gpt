@@ -2,9 +2,18 @@ import math
 import torch
 from torch import nn
 from torch.nn import functional as F
+from tqdm import tqdm
 
 CHUNK_SIZE = 8
 BATCH_SIZE = 32
+EVAL_ITERATIONS = 100
+
+if torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+    print("GPU is available. Using GPU...")
+else:
+    DEVICE = torch.device("cpu")
+    print("GPU is not available. Using CPU...")
 
 
 class BigramLanguageModel(nn.Module):
@@ -48,6 +57,24 @@ class BigramLanguageModel(nn.Module):
         return idx
 
 
+@torch.no_grad()
+def estimate_loss(model: nn.Module, train: list[str], test: list[str]):
+    model.eval()
+
+    loss_dict: dict[str, float] = {}
+    for name, dataset in (("train", train), ("test", test)):
+        loss_measurements = torch.zeros(EVAL_ITERATIONS)
+        for i in range(EVAL_ITERATIONS):
+            bx, by = get_batch(dataset=dataset)
+            _out, loss = model(bx, by)
+            loss_measurements[i] = loss.item()
+
+        loss_dict[name] = loss_measurements.mean().item()
+
+    model.train()
+    return loss_dict
+
+
 def get_vocabulary(dataset: str) -> list[str]:
     """Using a simple character-based vocabulary for now."""
     return list(sorted(set(dataset)))
@@ -61,7 +88,7 @@ def get_encoder_decoder(vocabulary: list[str]) -> tuple[callable, callable]:
     return encode, decode
 
 
-def get_batch(dataset: list[int], chunk_size: int, batch_size: int, device: str) -> tuple[torch.Tensor, torch.Tensor]:
+def get_batch(dataset: list[int], chunk_size: int=CHUNK_SIZE, batch_size: int=BATCH_SIZE, device: str=DEVICE) -> tuple[torch.Tensor, torch.Tensor]:
     sample_indices = torch.randint(len(dataset) - chunk_size, (batch_size,))
     x = torch.stack([dataset[i:i+chunk_size] for i in sample_indices]).to(device)
     y = torch.stack([dataset[i+1:i+chunk_size+1] for i in sample_indices]).to(device)
@@ -69,13 +96,6 @@ def get_batch(dataset: list[int], chunk_size: int, batch_size: int, device: str)
 
 
 def main():
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        print("GPU is available. Using GPU...")
-    else:
-        device = torch.device("cpu")
-        print("GPU is not available. Using CPU...")
-
     with open("./dataset.txt", "r") as dataset_file:
         dataset = dataset_file.read()
 
@@ -90,11 +110,11 @@ def main():
     train_set = encoded_dataset[:train_test_split]
     test_set = encoded_dataset[train_test_split:]
 
-    bigram_model = BigramLanguageModel(vocab_size=len(vocabulary)).to(device)
+    bigram_model = BigramLanguageModel(vocab_size=len(vocabulary)).to(DEVICE)
 
     optimizer = torch.optim.AdamW(bigram_model.parameters(), lr=1e-3)
-    for _ in range(10000):
-        xb, yb = get_batch(dataset=train_set, chunk_size=CHUNK_SIZE, batch_size=BATCH_SIZE, device=device)
+    for _ in tqdm(range(10000), desc="Training"):
+        xb, yb = get_batch(dataset=train_set)
 
         _logits, loss = bigram_model(xb, yb)
         
@@ -102,9 +122,10 @@ def main():
         loss.backward()
         optimizer.step()
 
-        print(loss.item())
+    print(f"Final loss: {estimate_loss(model=bigram_model, train=train_set, test=test_set)}")
 
-    print(''.join(decode(bigram_model.generate(torch.zeros((1, 1), dtype=torch.long, device=device), max_new_tokens=1000)[0].tolist())))
+    print("Test generation:")
+    print(''.join(decode(bigram_model.generate(torch.zeros((1, 1), dtype=torch.long, device=DEVICE), max_new_tokens=1000)[0].tolist())))
 
 
 if __name__ == "__main__":
