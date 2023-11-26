@@ -4,11 +4,13 @@ from torch import nn
 from torch.nn import functional as F
 from tqdm import tqdm
 
+# Hyperparameters
 CHUNK_SIZE = 8
 BATCH_SIZE = 32
 EVAL_ITERATIONS = 100
+EMBEDDING_SIZE = 32
 
-if torch.cuda.is_available():
+if torch.cuda.is_available() and False:
     DEVICE = torch.device("cuda")
     print("GPU is available. Using GPU...")
 else:
@@ -20,13 +22,36 @@ class BigramLanguageModel(nn.Module):
     def __init__(self, vocab_size: int):
         super().__init__()
 
+        # Intermediate embedding layer
         self.token_embedding_table = nn.Embedding(
             num_embeddings=vocab_size,
-            embedding_dim=vocab_size,
+            embedding_dim=EMBEDDING_SIZE,
+        )
+
+        # Encode the positions of tokens in the sequence
+        # These positional embeddings are learned
+        self.position_embedding_table = nn.Embedding(
+            num_embeddings=CHUNK_SIZE,
+            embedding_dim=EMBEDDING_SIZE,
+        )
+
+        # Final linear layer to get logits
+        self.language_model_head = nn.Linear(
+            in_features=EMBEDDING_SIZE,
+            out_features=vocab_size,
         )
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor = None):
-        logits = self.token_embedding_table(idx)
+        # TODO(richie): Is this okay?
+        # Truncate the sequence to only the last CHUNK_SIZE tokens
+        idx = idx[:, -CHUNK_SIZE:]
+
+        batch, sequence = idx.shape
+
+        token_embeddings = self.token_embedding_table(idx) # [batch_size, sequence_length, embedding_size]
+        positional_embeddings = self.position_embedding_table(torch.arange(sequence, device=DEVICE)) # [sequence_length, embedding_size]
+        x = token_embeddings + positional_embeddings # [batch_size, sequence_length, embedding_size]
+        logits = self.language_model_head(x) # [batch_size, sequence_length, vocab_size]
 
         if targets is None:
             loss = None
@@ -113,7 +138,7 @@ def main():
     bigram_model = BigramLanguageModel(vocab_size=len(vocabulary)).to(DEVICE)
 
     optimizer = torch.optim.AdamW(bigram_model.parameters(), lr=1e-3)
-    for _ in tqdm(range(10000), desc="Training"):
+    for _ in tqdm(range(10_000), desc="Training"):
         xb, yb = get_batch(dataset=train_set)
 
         _logits, loss = bigram_model(xb, yb)
