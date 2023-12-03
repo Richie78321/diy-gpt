@@ -246,6 +246,7 @@ def main():
     print("Test generation:")
     while True:
         print(''.join(decode(bigram_model.generate(torch.zeros((1, 1), dtype=torch.long, device=DEVICE), max_new_tokens=1000)[0].tolist())))
+        input()
 
 
 if __name__ == "__main__":
