@@ -10,6 +10,7 @@ BATCH_SIZE = 32
 EVAL_ITERATIONS = 100
 EMBEDDING_SIZE = 32
 NUM_HEADS = 4
+NUM_LAYERS = 3
 HEAD_SIZE = EMBEDDING_SIZE // NUM_HEADS
 
 assert EMBEDDING_SIZE % NUM_HEADS == 0
@@ -120,12 +121,8 @@ class BigramLanguageModel(nn.Module):
             embedding_dim=EMBEDDING_SIZE,
         )
 
-        self.transformer_blocks = nn.Sequential(
-            TransformerBlock(),
-            TransformerBlock(),
-            TransformerBlock(),
-            nn.LayerNorm(EMBEDDING_SIZE),
-        )
+        self.transformer_blocks = nn.Sequential(*[TransformerBlock() for _ in range(NUM_LAYERS)])
+        self.final_layernorm = nn.LayerNorm(EMBEDDING_SIZE)
 
         self.feedforward = FeedForward(embedding_size=EMBEDDING_SIZE)
 
@@ -144,6 +141,7 @@ class BigramLanguageModel(nn.Module):
         
         x = token_embeddings + positional_embeddings # [batch_size, sequence_length, embedding_size]
         x = self.transformer_blocks(x)
+        x = self.final_layernorm(x)
         logits = self.language_model_head(x) # [batch_size, sequence_length, vocab_size]
 
         if targets is None:
