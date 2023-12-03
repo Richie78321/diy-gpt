@@ -93,10 +93,13 @@ class TransformerBlock(nn.Module):
         self.msa_head = MultiHeadedAttention(num_heads=NUM_HEADS, head_size=HEAD_SIZE)
         self.feedforward = FeedForward(embedding_size=EMBEDDING_SIZE)
 
+        self.layer_norm_1 = nn.LayerNorm(normalized_shape=EMBEDDING_SIZE)
+        self.layer_norm_2 = nn.LayerNorm(normalized_shape=EMBEDDING_SIZE)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # The addition of x is a residual connection to improve gradient propagation.
-        x = x + self.msa_head(x)
-        x = x + self.feedforward(x)
+        x = x + self.msa_head(self.layer_norm_1(x))
+        x = x + self.feedforward(self.layer_norm_2(x))
         return x
 
 
@@ -121,6 +124,7 @@ class BigramLanguageModel(nn.Module):
             TransformerBlock(),
             TransformerBlock(),
             TransformerBlock(),
+            nn.LayerNorm(EMBEDDING_SIZE),
         )
 
         self.feedforward = FeedForward(embedding_size=EMBEDDING_SIZE)
