@@ -244,9 +244,12 @@ def main():
     print(f"Final loss: {estimate_loss(model=bigram_model, train=train_set, test=test_set)}")
 
     print("Test generation:")
-    while True:
-        print(''.join(decode(bigram_model.generate(torch.zeros((1, 1), dtype=torch.long, device=DEVICE), max_new_tokens=1000)[0].tolist())))
-        input()
+    try:
+        while True:
+            print(''.join(decode(bigram_model.generate(torch.zeros((1, 1), dtype=torch.long, device=DEVICE), max_new_tokens=1000)[0].tolist())))
+            input()
+    except KeyboardInterrupt:
+        print("Exiting")
 
 
 if __name__ == "__main__":
