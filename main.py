@@ -5,12 +5,14 @@ from torch.nn import functional as F
 from tqdm import tqdm
 
 # Hyperparameters
-CHUNK_SIZE = 64
-BATCH_SIZE = 32
+CHUNK_SIZE = 256
+BATCH_SIZE = 64
 EVAL_ITERATIONS = 100
-EMBEDDING_SIZE = 32
-NUM_HEADS = 4
-NUM_LAYERS = 3
+EMBEDDING_SIZE = 384
+NUM_HEADS = 6
+NUM_LAYERS = 6
+DROPOUT = 0.2
+LEARNING_RATE = 3e-4
 HEAD_SIZE = EMBEDDING_SIZE // NUM_HEADS
 
 assert EMBEDDING_SIZE % NUM_HEADS == 0
@@ -33,6 +35,7 @@ class FeedForward(nn.Module):
             nn.ReLU(),
             # Transform back into the residual pathway.
             nn.Linear(in_features=4 * embedding_size, out_features=embedding_size),
+            nn.Dropout(p=DROPOUT),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -48,6 +51,8 @@ class SelfAttention(nn.Module):
         self.key = nn.Linear(in_features=EMBEDDING_SIZE, out_features=head_size, bias=False)
         self.value = nn.Linear(in_features=EMBEDDING_SIZE, out_features=head_size, bias=False)
         self.register_buffer("tril", torch.tril(torch.ones(CHUNK_SIZE, CHUNK_SIZE)))
+
+        self.dropout = nn.Dropout(p=DROPOUT)
 
     def forward(self, x: torch.Tensor):
         # x is dimension [batch_size, sequence_length, embedding_size]
@@ -65,6 +70,7 @@ class SelfAttention(nn.Module):
         # Mask and normalize the attention weights
         attention_weights = attention_weights.masked_fill(self.tril[:sequence_length, :sequence_length] == 0, float("-inf"))
         attention_weights = F.softmax(attention_weights, dim=-1)
+        attention_weights = self.dropout(attention_weights)
 
         # Apply attention weights to value matrix
         return attention_weights @ v # [batch_size, sequence_length, sequence_length] @ [batch_size, sequence_length, head_size] = [batch_size, sequence_length, head_size]
@@ -77,6 +83,7 @@ class MultiHeadedAttention(nn.Module):
 
         output_size = head_size * num_heads
         self.projection = nn.Linear(in_features=output_size, out_features=output_size)
+        self.dropout = nn.Dropout(p=DROPOUT)
 
     def forward(self, x: torch.Tensor):
         # Multi-headed attention is simply using multiple self-attention heads and concatenating
@@ -85,7 +92,7 @@ class MultiHeadedAttention(nn.Module):
         
         # Use a linear transformation to "recombine" the multi-headed attention
         # and transform back into the result for the residual pathway.
-        return self.projection(x)
+        return self.dropout(self.projection(x))
 
 
 class TransformerBlock(nn.Module):
@@ -230,7 +237,7 @@ def main():
 
     bigram_model = BigramLanguageModel(vocab_size=len(vocabulary)).to(DEVICE)
 
-    optimizer = torch.optim.AdamW(bigram_model.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(bigram_model.parameters(), lr=LEARNING_RATE)
     for i in tqdm(range(3_000), desc="Training"):
         if i % 1000 == 0:
             print(f"Current loss: {estimate_loss(model=bigram_model, train=train_set, test=test_set)}")
