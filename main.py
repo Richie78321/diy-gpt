@@ -20,25 +20,27 @@ else:
 
 
 class SelfAttention(nn.Module):
-    def __init__(self):
+    def __init__(self, head_size: int = HEAD_SIZE):
         super().__init__()
 
         # Bias is False, yielding a simple matrix multiplication with learnable weights
-        self.query = nn.Linear(in_features=EMBEDDING_SIZE, out_features=HEAD_SIZE, bias=False)
-        self.key = nn.Linear(in_features=EMBEDDING_SIZE, out_features=HEAD_SIZE, bias=False)
-        self.value = nn.Linear(in_features=EMBEDDING_SIZE, out_features=HEAD_SIZE, bias=False)
+        self.query = nn.Linear(in_features=EMBEDDING_SIZE, out_features=head_size, bias=False)
+        self.key = nn.Linear(in_features=EMBEDDING_SIZE, out_features=head_size, bias=False)
+        self.value = nn.Linear(in_features=EMBEDDING_SIZE, out_features=head_size, bias=False)
         self.register_buffer("tril", torch.tril(torch.ones(CHUNK_SIZE, CHUNK_SIZE)))
 
     def forward(self, x: torch.Tensor):
         # x is dimension [batch_size, sequence_length, embedding_size]
-        _batch_size, sequence_length, _embedding_size = x.shape
+        _batch_size, sequence_length, embedding_size = x.shape
 
         # Get query, key, and value matrices
         q = self.query(x) # [batch_size, sequence_length, head_size]
         k = self.key(x) # [batch_size, sequence_length, head_size]
         v = self.value(x) # [batch_size, sequence_length, head_size]
 
-        attention_weights = q @ k.transpose(-2, -1) # [batch_size, sequence_length, head_size] @ [batch_size, head_size, sequence_length] = [batch_size, sequence_length, sequence_length]
+        # Scale the attention weights to maintain an effective variance of 1
+        # after computing the dot products.
+        attention_weights = q @ k.transpose(-2, -1) * (embedding_size ** -0.5) # [batch_size, sequence_length, head_size] @ [batch_size, head_size, sequence_length] = [batch_size, sequence_length, sequence_length]
 
         # Mask and normalize the attention weights
         attention_weights = attention_weights.masked_fill(self.tril[:sequence_length, :sequence_length] == 0, float("-inf"))
@@ -65,6 +67,9 @@ class BigramLanguageModel(nn.Module):
             embedding_dim=EMBEDDING_SIZE,
         )
 
+        # For now, the self-attention head size is the same as the embedding size.
+        self.sa_head = SelfAttention(head_size=EMBEDDING_SIZE)
+
         # Final linear layer to get logits
         self.language_model_head = nn.Linear(
             in_features=EMBEDDING_SIZE,
@@ -73,16 +78,13 @@ class BigramLanguageModel(nn.Module):
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor = None):
         # idx [batch_size, sequence_length]
-
-        # TODO(richie): Is this okay?
-        # Truncate the sequence to only the last CHUNK_SIZE tokens
-        idx = idx[:, -CHUNK_SIZE:]
-
         batch, sequence = idx.shape
 
         token_embeddings = self.token_embedding_table(idx) # [batch_size, sequence_length, embedding_size]
         positional_embeddings = self.position_embedding_table(torch.arange(sequence, device=DEVICE)) # [sequence_length, embedding_size]
         x = token_embeddings + positional_embeddings # [batch_size, sequence_length, embedding_size]
+        x = self.sa_head(x)
+        
         logits = self.language_model_head(x) # [batch_size, sequence_length, vocab_size]
 
         if targets is None:
@@ -97,7 +99,9 @@ class BigramLanguageModel(nn.Module):
     
     def generate(self, idx, max_new_tokens: int):
         for _ in range(max_new_tokens):
-            logits, _loss = self(idx) # outputs [batch_size, sequence_length, channels]
+            idx_context_window = idx[:, -CHUNK_SIZE:]
+
+            logits, _loss = self(idx_context_window) # outputs [batch_size, sequence_length, channels]
 
             # Focus on only logits from the last time step
             logits = logits[:, -1, :] # becomes [batch_size, channels]
