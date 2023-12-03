@@ -5,17 +5,47 @@ from torch.nn import functional as F
 from tqdm import tqdm
 
 # Hyperparameters
-CHUNK_SIZE = 8
+CHUNK_SIZE = 64
 BATCH_SIZE = 32
 EVAL_ITERATIONS = 100
 EMBEDDING_SIZE = 32
+HEAD_SIZE = 16
 
-if torch.cuda.is_available() and False:
+if torch.cuda.is_available():
     DEVICE = torch.device("cuda")
     print("GPU is available. Using GPU...")
 else:
     DEVICE = torch.device("cpu")
     print("GPU is not available. Using CPU...")
+
+
+class SelfAttention(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        # Bias is False, yielding a simple matrix multiplication with learnable weights
+        self.query = nn.Linear(in_features=EMBEDDING_SIZE, out_features=HEAD_SIZE, bias=False)
+        self.key = nn.Linear(in_features=EMBEDDING_SIZE, out_features=HEAD_SIZE, bias=False)
+        self.value = nn.Linear(in_features=EMBEDDING_SIZE, out_features=HEAD_SIZE, bias=False)
+        self.register_buffer("tril", torch.tril(torch.ones(CHUNK_SIZE, CHUNK_SIZE)))
+
+    def forward(self, x: torch.Tensor):
+        # x is dimension [batch_size, sequence_length, embedding_size]
+        _batch_size, sequence_length, _embedding_size = x.shape
+
+        # Get query, key, and value matrices
+        q = self.query(x) # [batch_size, sequence_length, head_size]
+        k = self.key(x) # [batch_size, sequence_length, head_size]
+        v = self.value(x) # [batch_size, sequence_length, head_size]
+
+        attention_weights = q @ k.transpose(-2, -1) # [batch_size, sequence_length, head_size] @ [batch_size, head_size, sequence_length] = [batch_size, sequence_length, sequence_length]
+
+        # Mask and normalize the attention weights
+        attention_weights = attention_weights.masked_fill(self.tril[:sequence_length, :sequence_length] == 0, float("-inf"))
+        attention_weights = F.softmax(attention_weights, dim=-1)
+
+        # Apply attention weights to value matrix
+        return attention_weights @ v # [batch_size, sequence_length, sequence_length] @ [batch_size, sequence_length, head_size] = [batch_size, sequence_length, head_size]
 
 
 class BigramLanguageModel(nn.Module):
@@ -42,6 +72,8 @@ class BigramLanguageModel(nn.Module):
         )
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor = None):
+        # idx [batch_size, sequence_length]
+
         # TODO(richie): Is this okay?
         # Truncate the sequence to only the last CHUNK_SIZE tokens
         idx = idx[:, -CHUNK_SIZE:]
