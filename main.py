@@ -50,6 +50,17 @@ class SelfAttention(nn.Module):
         return attention_weights @ v # [batch_size, sequence_length, sequence_length] @ [batch_size, sequence_length, head_size] = [batch_size, sequence_length, head_size]
 
 
+class MultiHeadedAttention(nn.Module):
+    def __init__(self, num_heads: int, head_size: int):
+        super().__init__()
+        self.heads = nn.ModuleList([SelfAttention(head_size=head_size) for _ in range(num_heads)])
+
+    def forward(self, x: torch.Tensor):
+        # Multi-headed attention is simply using multiple self-attention heads and concatenating
+        # the outputs together.
+        return torch.cat([head(x) for head in self.heads], dim=-1)
+
+
 class BigramLanguageModel(nn.Module):
     def __init__(self, vocab_size: int):
         super().__init__()
@@ -68,7 +79,7 @@ class BigramLanguageModel(nn.Module):
         )
 
         # For now, the self-attention head size is the same as the embedding size.
-        self.sa_head = SelfAttention(head_size=EMBEDDING_SIZE)
+        self.msa_head = MultiHeadedAttention(num_heads=4, head_size=EMBEDDING_SIZE // 4)
 
         # Final linear layer to get logits
         self.language_model_head = nn.Linear(
@@ -83,7 +94,7 @@ class BigramLanguageModel(nn.Module):
         token_embeddings = self.token_embedding_table(idx) # [batch_size, sequence_length, embedding_size]
         positional_embeddings = self.position_embedding_table(torch.arange(sequence, device=DEVICE)) # [sequence_length, embedding_size]
         x = token_embeddings + positional_embeddings # [batch_size, sequence_length, embedding_size]
-        x = self.sa_head(x)
+        x = self.msa_head(x)
         
         logits = self.language_model_head(x) # [batch_size, sequence_length, vocab_size]
 
