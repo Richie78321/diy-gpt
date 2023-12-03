@@ -19,6 +19,18 @@ else:
     print("GPU is not available. Using CPU...")
 
 
+class FeedForward(nn.Module):
+    def __init__(self, embedding_size: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_features=embedding_size, out_features=embedding_size),
+            nn.ReLU(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
 class SelfAttention(nn.Module):
     def __init__(self, head_size: int = HEAD_SIZE):
         super().__init__()
@@ -81,6 +93,8 @@ class BigramLanguageModel(nn.Module):
         # For now, the self-attention head size is the same as the embedding size.
         self.msa_head = MultiHeadedAttention(num_heads=4, head_size=EMBEDDING_SIZE // 4)
 
+        self.feedforward = FeedForward(embedding_size=EMBEDDING_SIZE)
+
         # Final linear layer to get logits
         self.language_model_head = nn.Linear(
             in_features=EMBEDDING_SIZE,
@@ -95,6 +109,7 @@ class BigramLanguageModel(nn.Module):
         positional_embeddings = self.position_embedding_table(torch.arange(sequence, device=DEVICE)) # [sequence_length, embedding_size]
         x = token_embeddings + positional_embeddings # [batch_size, sequence_length, embedding_size]
         x = self.msa_head(x)
+        x = self.feedforward(x)
         
         logits = self.language_model_head(x) # [batch_size, sequence_length, vocab_size]
 
