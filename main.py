@@ -238,17 +238,20 @@ def main():
     bigram_model = BigramLanguageModel(vocab_size=len(vocabulary)).to(DEVICE)
 
     optimizer = torch.optim.AdamW(bigram_model.parameters(), lr=LEARNING_RATE)
-    for i in tqdm(range(3_000), desc="Training"):
-        if i % 1000 == 0:
-            print(f"Current loss: {estimate_loss(model=bigram_model, train=train_set, test=test_set)}")
+    try:
+        for i in tqdm(range(3_000), desc="Training"):
+            if i % 250 == 0:
+                print(f"Current loss: {estimate_loss(model=bigram_model, train=train_set, test=test_set)}")
 
-        xb, yb = get_batch(dataset=train_set)
+            xb, yb = get_batch(dataset=train_set)
 
-        _logits, loss = bigram_model(xb, yb)
-        
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        optimizer.step()
+            _logits, loss = bigram_model(xb, yb)
+            
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            optimizer.step()
+    except KeyboardInterrupt:
+        print("Interrupting training")
 
     print(f"Final loss: {estimate_loss(model=bigram_model, train=train_set, test=test_set)}")
 
